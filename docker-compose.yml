@@ -1,0 +1,14 @@
+version : "3.9"
+
+volumes:
+  postgres_volume_local:
+
+services:
+  pg_local:
+    image: postgres:14-alpine3.17
+    env_file:
+      - local.env
+    ports:
+      - "54323:5432"
+    volumes:
+      - "postgres_volume_local:/var/lib/postgresql/data"

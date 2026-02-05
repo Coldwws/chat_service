@@ -30,4 +30,5 @@ message SendMessageRequest{
   string from = 1;
   string text = 2;
   google.protobuf.Timestamp timestamp = 3;
+  int64 chat_id = 4;
 }

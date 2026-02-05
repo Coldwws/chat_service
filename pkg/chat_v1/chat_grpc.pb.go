@@ -76,7 +76,7 @@ func (c *chatV1Client) SendMessage(ctx context.Context, in *SendMessageRequest, 
 // All implementations must embed UnimplementedChatV1Server
 // for forward compatibility.
 type ChatV1Server interface {
-	Create(context.Context, *CreateRequest) (*CreateResponse, error) 
+	Create(context.Context, *CreateRequest) (*CreateResponse, error)
 	Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error)
 	SendMessage(context.Context, *SendMessageRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedChatV1Server()
