@@ -1,13 +1,16 @@
 package main
 
 import (
+	"chat_server/internal/config"
 	desc "chat_server/pkg/chat_v1"
 	"context"
 	"fmt"
 	"log"
 	"net"
-	"time"
 	"sync"
+	"time"
+
+	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -105,7 +108,11 @@ func (s *server)Create(ctx context.Context, req *desc.CreateRequest)(*desc.Creat
 }
 
 func main(){
-	lis,err := net.Listen("tcp",fmt.Sprintf(":%d",grpcPort))
+	_ =godotenv.Load("local.env")
+
+	cfg := config.LoadConfig()
+
+	lis,err := net.Listen("tcp",cfg.GRPC.Addr())
 	if err != nil{
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -119,6 +126,5 @@ func main(){
 	if err := s.Serve(lis); err != nil{
 		log.Fatalf("failed to serve: %v", err)
 	}
-
 
 }

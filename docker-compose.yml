@@ -12,3 +12,15 @@ services:
       - "54323:5432"
     volumes:
       - "postgres_volume_local:/var/lib/postgresql/data"
+
+
+  app:
+    build:
+      context: .
+      dockerfile: DockerFile
+    env_file:
+      - local.env
+    depends_on:
+      - pg_local
+    ports:
+      - "50052:50052"
