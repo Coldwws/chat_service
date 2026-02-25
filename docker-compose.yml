@@ -1,4 +1,4 @@
-version : "3.9"
+
 
 volumes:
   postgres_volume_local:
@@ -14,6 +14,19 @@ services:
       - "postgres_volume_local:/var/lib/postgresql/data"
 
 
+  migrator:
+    build:
+      context: .
+      dockerfile: migration.Dockerfile
+    env_file:
+      - local.env
+    environment:
+      PG_HOST: pg_local
+    depends_on:
+      - pg_local
+    restart: on-failure
+
+
   app:
     build:
       context: .
@@ -22,5 +35,6 @@ services:
       - local.env
     depends_on:
       - pg_local
+      - migrator
     ports:
       - "50052:50052"
