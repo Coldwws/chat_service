@@ -13,9 +13,9 @@ type Config struct {
 
 func LoadConfig() Config {
 	return Config{
-		Env:  getEnv("env","local"),
-		GRPC: GRPCConfig{},
-		PG:   PGConfig{},
+		Env:  getEnv("ENV","local"),
+		GRPC: loadGRPC(),
+		PG:   loadPG(),
 	}
 }
 

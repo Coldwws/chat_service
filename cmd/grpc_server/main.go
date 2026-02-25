@@ -108,7 +108,7 @@ func (s *server)Create(ctx context.Context, req *desc.CreateRequest)(*desc.Creat
 }
 
 func main(){
-	_ =godotenv.Load("local.env")
+	_ = godotenv.Load("local.env")
 
 	cfg := config.LoadConfig()
 
