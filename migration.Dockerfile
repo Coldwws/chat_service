@@ -8,7 +8,7 @@ RUN chmod +x /bin/goose
 
 WORKDIR /root
 
-COPY postgres/migrations /migrations/
+COPY postgres/migrations/ /migrations/
 COPY migration.sh /migration.sh
 RUN chmod +x /migration.sh
 
