@@ -4,113 +4,146 @@ import (
 	"chat_server/internal/config"
 	desc "chat_server/pkg/chat_v1"
 	"context"
-	"fmt"
 	"log"
 	"net"
-	"sync"
-	"time"
-
+	"os"
+	"google.golang.org/protobuf/types/known/emptypb"
+	sq "github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/grpc/status"
 )
 
-const grpcPort = 50052
-
 type server struct{
+	db *pgxpool.Pool
 	desc.UnimplementedChatV1Server
 }
 
-type Chat struct{
-	ID int64
-	Usernames []string
+func (s *server) Create(ctx context.Context, req *desc.CreateRequest)(*desc.CreateResponse,error){
+	usernames := req.GetUsernames()
+
+	if len(usernames) == 0{
+		return nil, status.Error(codes.InvalidArgument,"usernames is required")
+	}
+
+	tx,err := s.db.Begin(ctx)
+	if err != nil{
+		return nil, status.Error(codes.Internal,"failed to begin transaction")
+	}
+	defer func ()  {
+		_ = tx.Rollback(ctx)
+	}()
+
+	qbChat := sq.Insert("chats").PlaceholderFormat(sq.Dollar).
+	Columns("created_at").
+	Values(sq.Expr("now()")).
+	Suffix("RETURNING id")
+	
+	q1,a1,err := qbChat.ToSql()
+	if err != nil{
+		return nil, status.Errorf(codes.Internal, "failed to build query: %v",err)
+	}
+	var chatID int64
+	if err := tx.QueryRow(ctx,q1,a1...).Scan(&chatID);err != nil{
+		return nil, status.Error(codes.Internal,"failed to create chat")
+	}
+
+	for _, u := range usernames{
+		if u == ""{
+			return nil, status.Error(codes.InvalidArgument,"Username cannot be empty")
+		}
+		qbU := sq.Insert("chat_users").
+		PlaceholderFormat(sq.Dollar).
+		Columns("chat_id","username").Values(chatID,u)
+
+		q2,a2,err := qbU.ToSql()
+		if err != nil{
+			return nil, status.Error(codes.Internal,"Failed to build query")
+		}
+
+		if _, err := tx.Exec(ctx,q2,a2...); err != nil{
+			return nil, status.Error(codes.Internal,"failed to add user to chat")
+		}
+	}
+	if err:= tx.Commit(ctx);err != nil{
+		return nil, status.Error(codes.Internal,"failed to commit tx")
+	}
+
+	return &desc.CreateResponse{Id: chatID},nil
 }
 
+func (s *server) Delete(ctx context.Context, req *desc.DeleteRequest)(*emptypb.Empty,error){
+	deleteID := req.GetId()
+	log.Printf("Delete chat with ID: ",deleteID)
 
-type Message struct{
-	From string
-	Text string
-	Timestamp time.Time
-}
+	if deleteID == 0{
+		return nil, status.Error(codes.InvalidArgument,"ID is required")
+	}
+	qb := sq.Delete("chats").PlaceholderFormat(sq.Dollar).Where(sq.Eq{"id":deleteID})
 
-var(
-	mu sync.RWMutex
-	chats = make(map[int64]Chat)
-	messages = make(map[int64][]Message)
-	nextID int64 = 1
-)
-
-func genChatID()int64{
-	mu.Lock()
-	defer mu.Unlock()
-	id := nextID
-	nextID++
-	return id
-}
-
-
-func (s *server)SendMessage(ctx context.Context, req *desc.SendMessageRequest)(*emptypb.Empty,error){
-
-	if req.ChatId == 0{
-		return nil, fmt.Errorf("chat_id is required")
+	query,args,err := qb.ToSql()
+	if err != nil{
+		return nil,status.Error(codes.Internal,"Failed to build query")
 	}
 
-	if req.From == ""{
-		return nil, fmt.Errorf("from is required")
+	ct, err := s.db.Exec(ctx,query,args...)
+	if err != nil{
+		return nil,status.Error(codes.Internal,"Failed to delete chat")
+	} 
+	if ct.RowsAffected() == 0{
+		return nil,status.Error(codes.NotFound,"Chat not found")
 	}
-	if req.Text == ""{
-		return nil, fmt.Errorf("text is required")
-	}
-
-	msg := Message{
-		From : req.From,
-		Text : req.Text,
-		Timestamp : req.Timestamp.AsTime(),
-	}
-
-	mu.Lock()
-	if _,ok := messages[req.ChatId]; !ok{
-		mu.Unlock()
-		return nil, fmt.Errorf("chat not found: %d", req.ChatId)
-	}
-
-	messages[req.ChatId] = append(messages[req.ChatId],msg)
-	mu.Unlock()
-
-		log.Printf("Send Message | chat : %d | from: %s | text: %s | timestamp: %s",
-		req.ChatId, req.From, req.Text, req.Timestamp.AsTime())
-
 	return &emptypb.Empty{},nil
 }
 
 
-func (s *server)Create(ctx context.Context, req *desc.CreateRequest)(*desc.CreateResponse, error){
-
-	if req.Usernames == nil{
-		return nil, fmt.Errorf("usernames is required")
+func (s *server)SendMessage(ctx context.Context, req *desc.SendMessageRequest)(*emptypb.Empty,error){
+	if req.GetChatId() == 0{
+		return nil, status.Error(codes.InvalidArgument,"chat_id is required")
+	}
+	if req.GetFrom() == ""{
+		return nil, status.Error(codes.InvalidArgument,"from is required")
 	}
 
-	chatId := genChatID()
-	
-	mu.Lock()
-	chats[chatId] = Chat{
-		ID: chatId,
-		Usernames: req.Usernames,
+	if req.GetText() == ""{
+		return nil, status.Error(codes.InvalidArgument,"text is required")
 	}
-	messages[chatId] = []Message{}
-	mu.Unlock()
 
-	log.Printf("Create Chat | id = %d | usernames = %v",chatId, req.Usernames)
-	
-	return &desc.CreateResponse{
-		Id: chatId,}, nil
+	if req.GetTimestamp() == nil{
+		return nil, status.Error(codes.InvalidArgument,"timestamp is required")
+	}
+
+	qb := sq.Insert("messages").
+	PlaceholderFormat(sq.Dollar).Columns("chat_id","sender","text","created_at").
+	Values(req.GetChatId(),req.GetFrom(),req.GetText(),req.GetTimestamp().AsTime())
+
+	query,args,err := qb.ToSql()
+	if err != nil{
+		return nil, status.Error(codes.Internal,"Failed to build query")
+	}
+	_, err = s.db.Exec(ctx,query,args...)
+	if err != nil{
+		return nil,status.Error(codes.Internal,"Failed to insert message")
+	}
+	return &emptypb.Empty{},nil
 }
 
 func main(){
-	_ = godotenv.Load("local.env")
+	if f := os.Getenv("ENV_FILE"); f!= ""{
+		_ = godotenv.Load(f)
+	}
 
 	cfg := config.LoadConfig()
+	ctx := context.Background()
+
+	poll,err := pgxpool.Connect(ctx,cfg.PG.DSN())
+	if err != nil{
+		log.Fatalf("Failed to connect database: %v",err)
+	}
+	defer poll.Close()
 
 	lis,err := net.Listen("tcp",cfg.GRPC.Addr())
 	if err != nil{
@@ -119,7 +152,8 @@ func main(){
 
 	s := grpc.NewServer()
 	reflection.Register(s)
-	desc.RegisterChatV1Server(s, &server{})
+	srv := &server{db : poll}
+	desc.RegisterChatV1Server(s, srv)
 
 	log.Printf("Server listening at addr: %v", lis.Addr())
 
